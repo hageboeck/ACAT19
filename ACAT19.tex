@@ -14,7 +14,7 @@
 
 \begin{document}
 
-\title{Making RooFit Ready for Run3}
+\title{Making RooFit Ready for Run 3}
 \author{S Hageb\"ock$^1$ and L Moneta$^1$}
 \address{$^1$ CERN, 1211 Geneva 23, Switzerland}
 \ead{stephan.hageboeck@cern.ch}
@@ -22,22 +22,21 @@
 \begin{abstract}
 \RooFit and \RooStats, the toolkits for statistical modelling in \ROOT, are used in most searches and measurements at the Large Hadron Collider. The data to be collected in Run 3 will enable measurements with higher precision and models with larger complexity, but also require faster data processing.
 
-In this work, first results on modernising \RooFit's collections, restructuring data flow and vectorising likelihood fits in RooFit will be discussed. These improvements will enable the LHC experiments to process larger datasets without having to compromise with respect to model complexity, as fitting times would increase significantly with the large datasets to be expected in Run 3.
+In this work, first results on modernising \RooFit's collections, restructuring data flow and vectorising likelihood fits in \RooFit will be discussed. These improvements will enable the LHC experiments to process larger datasets without having to compromise with respect to model complexity, as fitting times would increase significantly with the large datasets to be expected in Run 3.
 \end{abstract}
 
 \section{Introduction}
-\texttt{RooFit}\cite{RooFit} is a C++ package for statistical modelling distributed with \texttt{ROOT}\cite{ROOT}.
-\RooFit allows to define computation graphs consisting of variables, parameters, functions and PDFs in order to compute likelihoods or 
-$\chi^2$-values and perform fits to data. An example of such a computation graph is shown in \cref{PDFTree}. Every node of the graph can be
+\texttt{RooFit}~\cite{RooFit} is a C++ package for statistical modelling distributed with \texttt{ROOT}~\cite{ROOT}.
+\RooFit allows to define computation graphs connecting observables, parameters, functions and PDFs in order to compute likelihoods and perform fits to data. An example of such a computation graph is shown in \cref{PDFTree}. Every node of the graph can be
 evaluated to a real value (\textit{i.e.}, real-valued number), which for a PDF denotes the probability to find a data event with the given
-values of observables, and given the model represented by the computation graph and a set of parameters.
+values of observables, for a given model and its set of parameters.
 
 \texttt{RooStats} is a collection of statistical tools to perform statistical tests with \texttt{RooFit}
 models (\textit{e.g.} Toy Monte Carlo, setting limits). Further, \texttt{HistFactory} provides tools to create \RooFit models from a collection of \ROOT histograms.
 
 \RooFit was originally developed for the BaBar collaboration, but later picked up by many others. Its central parts were designed for
 single-core processors, and were neither optimised for large caches nor SIMD computations. This work stands at the beginning of efforts to
-modernise \RooFit to speed up fits, and make it more accessible from both C++ and Python. The following features will be released in \ROOT 6.18.
+modernise \RooFit to speed up fits, and make it more accessible from both C++ and Python. The features to be described in the following two sections will be released in \texttt{\ROOT 6.18}.
 
 
 
@@ -46,29 +45,30 @@ modernise \RooFit to speed up fits, and make it more accessible from both C++ an
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.9\textwidth]{image1.png}
-\caption{\label{PDFTree}A RooFit likelihood model\protect\footnotemark. This model represents the sum of a signal and background PDF,
+\caption{\label{PDFTree}A \RooFit likelihood model\protect\footnotemark. This model represents the sum of a signal and background PDF,
 where the former is a convolution of other PDFs, the latter is a polynomial distribution.
 Likelihood models are implemented as tree-like structures of nodes that can be evaluated to real values.
 Blue nodes represent parameters or observables, red nodes, which depend on the values of other nodes, represent functions or PDFs.
 }
 \end{figure}
-In \RooFit, computation graphs, as well as sets and lists of observables or parameters are saved with the help of \texttt{RooAbsCollection},
-the base class of \RooFit's main collections \texttt{RooArgSet} and \texttt{RooArgList}. Internally, these collections were using a
-linked list with optional hash lookup to store objects.
+In \RooFit, computation graphs and sets/lists of functions, PDFs, observables and parameters are saved with the help of \texttt{RooAbsCollection},
+the base class of \RooFit's main collections \texttt{RooArgSet} and \texttt{RooArgList}. Internally, these were using a
+linked list with optional hash lookup.
 
 The most common operation on these collections during fitting, \ie, repeated evaluation of the computation graph,
-is iteration. Other less frequent operations are appending and finding elements. Collections are rarely sorted
-or modified, which favours an array-like data structure.
+is iteration. Less frequent operations are appending and finding elements, and collections are very rarely sorted
+or modified. This favours array-like data structures, and indeed 
+the linked lists were identified as a bottleneck for fits.
 
-\footnotetext{This figure was obtained using the \texttt{graphVizTree()} function supported by all nodes in \RooFit and \texttt{graphviz}.}
-Therefore, the internal linked list was replaced by a \texttt{std::vector}, mostly to speed up iterating these collections. The
-\texttt{RooAbsCollection} was further extended with an STL-like interface (\texttt{size, begin, end}) to enable range-based for loops
-for ease of use. Forward iteration is sped up by about $20\,\%$, and random access completes in constant time.
-\Cref{itBefore,itAfter} compare iterating through a collection with the old and new iterators. The STL-like interface allows to
-reduce heap allocations, and replaces while loops (with non-local variables) by range-based for loops. This reduces code clutter, memory
+Therefore, the linked list in \texttt{RooAbsCollection} was replaced by a \texttt{std::vector}, mostly to speed up iterating. 
+\texttt{RooAbsCollection} was further provided with an STL-like interface (\texttt{size, begin, end}) to enable range-based for loops.
+This speeds up forward iteration by about $20\,\%$, and random access completes in constant time.
+\footnotetext{This figure was obtained using the \texttt{graphVizTree()} export supported by all nodes in a \RooFit graph.}
+The \cref{itBefore,itAfter} compare the old and new interface. The STL-like interface allows to
+reduce heap allocations, and replaces while loops with non-local variables by range-based for loops. This reduces code clutter and the danger of memory
 leaks, dangling pointers and variable shadowing. It will also facilitate
-generating Python bindings to iterate through \RooFit's collections using Python loops. \Cref{speedupSTL} compares
-run times for typical \RooFit workflows\footnote{These are a selection of representative \RooFit tutorials.} between \ROOT 6.16 and 6.18.
+generating \ROOT's automatic Python bindings to iterate through \RooFit's collections in Python. \Cref{speedupSTL} compares
+run times for typical \RooFit workflows\footnote{These are a selection of representative \RooFit tutorials.} between \texttt{\ROOT 6.16} and \texttt{6.18}.
 Depending on how often collections are iterated, the speed up varies between $5$ and $21\,\%$. Tests with an ATLAS likelihood 
 model~\cite{Hbb} yielded a speed up of $19\,\%$.
 
@@ -95,45 +95,44 @@ model~\cite{Hbb} yielded a speed up of $19\,\%$.
 \includegraphics[trim=0 0 20mm 0,clip,width=0.9\textwidth]{tutorialsSpeed.png}
 \end{center}
 \caption{\label{speedupSTL}%
-Comparison of run times for typical \RooFit workflows between \ROOT 6.16 and 6.18. Frequent use of STL-like iterators leads to a
+Comparison of run times for typical \RooFit workflows between \ROOT \texttt{6.16} and \texttt{6.18}. Frequent use of STL-like iterators leads to a
 speed up of $20\,\%$, heavy use of legacy iterators to a slow down.
 }
 \end{figure}
 
 \subsection{Backward Compatibility}
-The iterator interface of \texttt{RooAbsCollection} and its subclasses exposed three kinds of iterators to users, one of which
+The old interface of \texttt{RooAbsCollection} and its subclasses exposed three kinds of iterators to users, one of which
 is shown in \cref{itBefore}. All three are being used in \RooFit, and it is likely that \RooFit's users also use all three.
 Removing any of these would therefore break user code.
 
-To provide backward compatibility, the legacy iterators were re-implemented to also work on the new collections. Since the old \RooFit
-collections were based on a linked list, the legacy iterators would have to remain valid also when reallocations happen.
+To provide backward compatibility, these legacy iterators were re-implemented to also work with the new collections. Since the old \RooFit
+collections were based on a linked list, the legacy iterators need to remain valid also when reallocations happen.
 Therefore, the legacy iterators hold a reference to the new collection, and use index access to
 iterate through it. This makes them tolerant against reallocations, but inserting or deleting elements \textit{before} the current
-position is not supported. Not a single instance of such usage was found in \RooFit, but nevertheless, run-time checks were added
-to warn users if they insert/delete before the current iterator. These are performed only if \ROOT is compiled with assertions enabled.
+position is not supported, unlike for linked lists. Not a single instance of such usage was found in \RooFit, though. Nevertheless, run-time checks were added
+to warn users if they insert/delete before the current iterator. These are performed only if \ROOT is compiled with assertions enabled, and only for legacy iterators.
 
-All legacy iterators, further need to work both with the original \texttt{RooLinkedList} and
+All legacy iterators further need to work both with the original \texttt{RooLinkedList} and
 with the STL-based collections\footnote{The \texttt{RooLinkedList} will be deprecated, but not all instances of its usage have been removed.
 It might further be used in user code.}. They were therefore implemented as adapters to a polymorphic iterator interface, which
 supports both the \texttt{RooLinkedList} and the counting iterator. This means that all legacy iterators will work irrespective of
 reallocations and the actual type of the collection, but they are slower than the fastest original \RooFit iterator, because they
-require a heap allocation to polymorphically switch between different iterator backends. The slow down observed for one workflow in
+require a heap allocation to polymorphically switch between different  backends. The slow down observed for one workflow in
 \cref{speedupSTL} is caused by this.
 
 Nevertheless, instances of slow legacy iterators are easily found using profiling tools, and can be replaced by STL
-iterators, which leads to a speed up of $20\,\%$. The most critical iterators in \RooFit have already been replaced,
+iterators by changing the code as shown in \cref{itBefore,itAfter}, which leads to a speed up of $20\,\%$. The most critical iterators in \RooFit have already been replaced,
 and less critical iterators will be replaced as the modernisation of \RooFit continues.
 
 
 
 
 
-\section{Faster \HistFactory Models}
+\section{Faster \HistFactory Models\label{sec:HistFactory}}
 \HistFactory~\cite{HistFactory} is a toolkit to create \RooFit models from a collection of histograms. It supports multiple channels,
-multiple signal and background samples, as well as sample scale factors, systematic uncertainties such as histogram shape uncertainties or
-normalisation uncertainties, and allows to implement combined measurements of parameters such as a signal strength.
+multiple signal and background samples, sample scale factors, systematic uncertainties for shape and normalisation differences in histograms, and allows to implement combined measurements of parameters such as a signal strength.
 
-To parametrise systematic uncertainties using histograms, users supply three histograms of the same distribution: the nominal distribution,
+To parametrise systematic uncertainties using histograms, users supply three histograms of the same distribution: the nominal distribution
 and two histograms representing the $\pm 1\, \sigma$ uncertainty. Given that these have to be evaluated for multiple (sometimes hundreds) of
 systematic uncertainties, for multiple samples and multiple channels, several thousands of histograms might have to be analysed.
 
@@ -141,7 +140,7 @@ When \HistFactory was implemented, move semantics or shared pointers were not av
 histograms, leading to a large overhead of copying and deleting histograms. Performance-critical sections of 
 the \HistFactory code were therefore revisited, and move semantics as well as shared pointers implemented. This speeds up creating a likelihood
 model for an ATLAS measurement~\cite{Hbb} by more than ten times, with identical results. This model comprises $10\,832$
-histograms, $28$ channels and $253$ systematic uncertainties, and was constructed in $150\,\mathrm{s}$ instead of $1\,800\,\mathrm{s}$. Fits using this model
+histograms, $28$ channels and $253$ systematic uncertainties, and was constructed in $150\,\mathrm{s}$ instead of $1\,800\,\mathrm{s}$. Fits using this model furthermore
 converged $20\,\%$ faster because of the optimisations discussed in \cref{sec:STLCollections}.
 
 
@@ -150,57 +149,60 @@ converged $20\,\%$ faster because of the optimisations discussed in \cref{sec:ST
 
 
 \section{Batched Likelihood Computations}
-A bottleneck for likelihood computations in \RooFit is to repeatedly evaluate the computation graph such as the one 
+A bottleneck for likelihood computations in \RooFit is the repeated evaluation of the computation graph such as the one 
 shown in \cref{PDFTree}. To compute a likelihood, the probability of observing \textit{each} event in the dataset has to be computed.
-\RooFit achieves this by loading the values of the observables into the leaves of the computation graph, and evaluating the probability of
+\RooFit achieves this by loading the values of the observables into the leaves of the computation graph for a \textit{single} event, and evaluating the probability of
 the top node. Each node caches its last value, and therefore constant branches of the computation graph (\textit{e.g.} branches that only 
 depend on parameters) are only computed once.
 Yet, all branches that depend on observables have to be recomputed for each entry in the dataset. In \cref{PDFTree}, for example, the node
 "t" in the centre of the graph is the observable, whereas other leaves are parameters. This means that the majority of nodes has to be
-recomputed for each entry in the dataset, \ie, the computation graph has to be traversed numerous times. Evaluating a node involves virtual
-function calls, and the number of such calls is proportional to the number of entries in the dataset and
+recomputed for each entry in the dataset. Evaluating a node involves virtual
+function calls, and the number of such calls is proportional both to the number of entries in the dataset and
 to the number of (non-constant) nodes in the graph, $N_\mathrm{Data} \cdot N_\mathrm{Nodes}$. For a small graph of 10 nodes and one million
 events, this already amounts to considerably more than 10 million function calls because additional calls for the normalisation of PDFs and
-for invalidating of (node-local) caches are necessary.
+for invalidating (node-local) caches are necessary.
 
-Furthermore, loading only single values into the nodes of the computation graph is hostile to CPU caches. There is a high likelihood that
+Furthermore, loading single values into the nodes of the computation graph is hostile to CPU caches. There is a high likelihood that
 when a node is being revisited to load the next entry, data have been thrashed from the highest-level cache(s). This means that \RooFit runs inefficient on
-modern CPUs because of poor data locality and memory access.
+modern CPUs because of poor data locality and inefficient memory access patterns.
 
 \subsection{Batch Computations for Higher Data Locality}
 \begin{figure}[t]
 \begin{center}
 \includegraphics[width=1.\linewidth]{batchAndVecSpeed.png}
 \end{center}
-\caption{\label{VecSpeed}Run time for fitting different likelihood models to datasets of two million events. \textbf{Middle graph}: Loading
-batches of values instead of (\textbf{bottom graph}) single entries results in a speed up of $3.5{\times}$.
-\textbf{Top graph}: Additionally using SIMD instructions increases the speed up to $7{\times}$.}
+\caption{\label{VecSpeed}Run time for fitting different likelihood models to datasets of two million events. \textbf{Top}: Using SIMD instructions and batch data processing increases the speed by $7{\times}$. \textbf{Middle}: Batch data processing leads to a speed up of $3.5{\times}.$ \textbf{Bottom}: Current \RooFit.}
 \end{figure}
 
 To demonstrate that a likelihood evaluation can be sped up by loading batches of data, a preliminary interface using \texttt{std::span} was
 implemented for a few selected PDFs (Gaussian, Poisson and exponential distribution, summation of PDFs).
 Instead of computing only one probability per node, all probabilities for all entries in the data set were
-computed in a \textit{single} function call for each node. Since computations could now operate on array-like structures, data locality, caching and prefetching were improved.
-\Cref{VecSpeed} shows that run times for fitting simple models decreased by
-a factor $2$ to $3.5$. The speed up is expected to be larger for larger models.
+computed in a \textit{single} function call for each node. Since such computations operate on array-like structures, data locality, caching and prefetching improve.
+\Cref{VecSpeed} shows that run times for fitting simple models decrease by
+a factor $2$ to $3.5$. The speed up is expected to be even larger for larger models.
 
 \subsection{SIMD Computations}
 When computations on array-like structures are performed, single-instruction-multiple-data computations (SIMD) can be used. The automatic
-vectorisation feature of the clang compiler was used to vectorise computations for an AVX architecture for the Gaussian and exponential distributions, as well as the
+vectorisation optimisation of the clang compiler was used to vectorise computations for an AVX architecture for the Gaussian and exponential distributions, as well as the
 addition of PDFs and the normalisation of the three. This requires auto-vectorisable mathematical functions, which need to be inlinable, and
 not have any data dependencies between slots in the underlying arrays. Such functions are provided by the
 \texttt{VDT}~\cite{VDT} package, of which the logarithm and exponential function were used. Further, computations were rewritten such
 that there are no data dependencies, that they can be executed entirely in registers,
 and that they use only limited branches, no (non-inlinable) functions and only simple reductions.
 
-Computations for the Gaussian, Poisson, exponential distribution, as well as the summation and normalisation of PDFs were successfully
-vectorised, increasing the speed up to $6{\times}$ to $7{\times}$.
+Vectorising computations for these selected PDFs, increased the speed up to $6{\times}$ to $7{\times}$.
 
-\bigskip
-Work on batched and vectorised computations will continue. The batch interface will be refined to work with any PDF, and a generic
-fall-back implementation that computes single values and writes them to an array-like output structure will be provided. Auto-vectorisable batch computations will be implemented for a growing number of PDFs, such that the
-single-thread performance of \RooFit will be increased by several factors without requiring code changes on the user side.
+
+
+\section{Summary}
+The improvements discussed in \cref{sec:STLCollections,sec:HistFactory} will be released in \texttt{\ROOT 6.18},
+and the work on batched and vectorised computations will continue. The batch interface will be refined to work with any PDF, and a fall-back
+implementation for PDFs that have not been modified will be provided. Auto-vectorisable batch computations will be implemented for a growing number of PDFs to increase the
+single-thread performance of \RooFit by several factors without requiring code changes on the user side.
 In conjunction with work an parallelising computations~\cite{Patrick}, a speed up by more than an order of magnitude can be expected.
+
+
+\vfill
 
 \section*{References}
 \bibliography{ACAT19}
